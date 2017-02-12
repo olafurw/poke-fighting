@@ -6,11 +6,40 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
+#include <map>
+#include <string>
 
 static const auto locSeed = std::chrono::system_clock::now().time_since_epoch().count();
-static const int locGridSize = 256;
-static const int locIterationCount = 600;
+static const int locGridSize = 128;
+static const int locIterationCount = 3000;
 static const unsigned int locTypeCount = 18;
+
+enum Type
+{
+	Normal = 0,
+	Fire,
+	Water,
+	Electric,
+	Grass,
+	Ice,
+	Fighting,
+	Poison,
+	Ground,
+	Flying,
+	Psychic,
+	Bug,
+	Rock,
+	Ghost,
+	Dragon,
+	Dark,
+	Steel,
+	Fairy
+};
+
+static std::map<Type, int> locWinCount;
+static std::map<Type, int> locLossCount;
+static std::map<Type, int> locAliveCount;
+static int locFightCount = 0;
 
 static const float locDamageGrid[locTypeCount][locTypeCount] = {
 	{ 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.5f, 0.0f, 1.0f, 1.0f, 0.5f, 1.0f }, // Normal
@@ -50,33 +79,94 @@ RandomValue(
 	return dis(RandomGenerator());
 }
 
-enum Type
+struct Position
 {
-	Normal = 0,
-	Fire,
-	Water,
-	Electric,
-	Grass,
-	Ice,
-	Fighting,
-	Poison,
-	Ground,
-	Flying,
-	Psychic,
-	Bug,
-	Rock,
-	Ghost,
-	Dragon,
-	Dark,
-	Steel,
-	Fairy
+			Position(): myX(0), myY(0) {}
+			Position(const int aX, const int aY): myX(aX), myY(aY) {}
+			Position(const Position& aPosition): myX(aPosition.myX), myY(aPosition.myY) {}
+
+	void	DecrementX();
+	void	IncrementX();
+	void	DecrementY();
+	void	IncrementY();
+
+	int		myX;
+	int		myY;
 };
+
+void
+Position::DecrementX()
+{
+	myX -= 1;
+	if (myX < 0)
+	{
+		myX = locGridSize - 1;
+	}
+}
+
+void
+Position::IncrementX()
+{
+	myX += 1;
+	if (myX == locGridSize)
+	{
+		myX = 0;
+	}
+}
+
+void
+Position::DecrementY()
+{
+	myY -= 1;
+	if (myY < 0)
+	{
+		myY = locGridSize - 1;
+	}
+}
+
+void
+Position::IncrementY()
+{
+	myY += 1;
+	if (myY == locGridSize)
+	{
+		myY = 0;
+	}
+}
 
 char
 TypeToCharacter(
 	const Type	aType)
 {
 	return static_cast<char>(aType + 65);
+}
+
+std::string
+TypeToString(
+	const Type	aType)
+{
+	switch (aType)
+	{
+		case Type::Normal: return "Normal";
+		case Type::Fire: return "Fire";
+		case Type::Water: return "Water";
+		case Type::Electric: return "Electric";
+		case Type::Grass: return "Grass";
+		case Type::Ice: return "Ice";
+		case Type::Fighting: return "Fighting";
+		case Type::Poison: return "Poison";
+		case Type::Ground: return "Ground";
+		case Type::Flying: return "Flying";
+		case Type::Psychic: return "Psychic";
+		case Type::Bug: return "Bug";
+		case Type::Rock: return "Rock";
+		case Type::Ghost: return "Ghost";
+		case Type::Dragon: return "Dragon";
+		case Type::Dark: return "Dark";
+		case Type::Steel: return "Steel";
+		case Type::Fairy: return "Fairy";
+		default: return "ERROR";
+	}
 }
 
 float
@@ -94,13 +184,20 @@ struct Pokemon
 	Type	myType;
 };
 
+int
+DamageTo(
+	const Pokemon&	aPokemonA,
+	const Pokemon&	aPokemonB)
+{
+	return aPokemonA.myDamage * GetEffectiveness(aPokemonA.myType, aPokemonB.myType);
+}
+
 void
 Fight(
 	Pokemon&	aPokemonA,
 	Pokemon&	aPokemonB)
 {
-	const int damageA = aPokemonA.myDamage * GetEffectiveness(aPokemonA.myType, aPokemonB.myType);
-	aPokemonB.myHealth -= damageA;
+	aPokemonB.myHealth -= DamageTo(aPokemonA, aPokemonB);
 }
 
 Pokemon
@@ -125,54 +222,87 @@ Regenerate(
 }
 
 void
-RandomNeighbour(
-	const int	aX,
-	const int	aY,
-	int&		aOutX,
-	int&		aOutY)
+WeakestNeighbour(
+	const Position								aPos,
+	Position&									aOutNeighbourPos,
+	const std::vector<std::vector<Pokemon>>&	aPokemans)
 {
-	aOutX = aX;
-	aOutY = aY;
+	std::vector<int> neighbourHealth;
+	std::vector<Position> neigbourPos;
+
+	neigbourPos.emplace_back(Position(aPos));
+	Position& p0 = neigbourPos[0];
+	p0.DecrementY();
+	neighbourHealth.push_back(aPokemans[p0.myX][p0.myY].myHealth);
+
+	neigbourPos.emplace_back(Position(aPos));
+	Position& p1 = neigbourPos[1];
+	p1.IncrementX();
+	neighbourHealth.push_back(aPokemans[p1.myX][p1.myY].myHealth);
+
+	neigbourPos.emplace_back(Position(aPos));
+	Position& p2 = neigbourPos[2];
+	p2.IncrementY();
+	neighbourHealth.push_back(aPokemans[p2.myX][p2.myY].myHealth);
+
+	neigbourPos.emplace_back(Position(aPos));
+	Position& p3 = neigbourPos[3];
+	p3.DecrementX();
+	neighbourHealth.push_back(aPokemans[p3.myX][p3.myY].myHealth);
+
+	int lowestHealth = -1;
+	int lowestHealthIndex = 0;
+
+	for (int i = 0; i < neighbourHealth.size(); ++i)
+	{
+		if (lowestHealth == -1)
+		{
+			lowestHealth = neighbourHealth[i];
+			continue;
+		}
+
+		if (lowestHealth > neighbourHealth[i])
+		{
+			lowestHealth = neighbourHealth[i];
+			lowestHealthIndex = i;
+		}
+	}
+
+	aOutNeighbourPos.myX = neigbourPos[lowestHealthIndex].myX;
+	aOutNeighbourPos.myY = neigbourPos[lowestHealthIndex].myY;
+}
+
+void
+RandomNeighbour(
+	const Position	aPos,
+	Position&		aOutNeighbourPos)
+{
+	aOutNeighbourPos.myX = aPos.myX;
+	aOutNeighbourPos.myY = aPos.myY;
 
 	const int neighbourDirection = RandomValue(0, 3);
 	
 	if (neighbourDirection == 0)
 	{
-		aOutY -= 1;
-		if (aOutY < 0)
-		{
-			aOutY = locGridSize - 1;
-		}
+		aOutNeighbourPos.DecrementY();
 
 		return;
 	}
 	else if (neighbourDirection == 1)
 	{
-		aOutX += 1;
-		if (aOutX == locGridSize)
-		{
-			aOutX = 0;
-		}
+		aOutNeighbourPos.IncrementX();
 
 		return;
 	}
 	else if (neighbourDirection == 2)
 	{
-		aOutY += 1;
-		if (aOutY == locGridSize)
-		{
-			aOutY = 0;
-		}
+		aOutNeighbourPos.IncrementY();
 
 		return;
 	}
 	else if (neighbourDirection == 3)
 	{
-		aOutX -= 1;
-		if (aOutX < 0)
-		{
-			aOutX = locGridSize - 1;
-		}
+		aOutNeighbourPos.DecrementX();
 
 		return;
 	}
@@ -226,17 +356,24 @@ Iterate(
 		{
 			Pokemon& pokemonA = aPokemans[x][y];
 
-			int enemyX = 0;
-			int enemyY = 0;
-			RandomNeighbour(x, y, enemyX, enemyY);
+			Position pos(x, y);
+			Position enemyPos;
+			WeakestNeighbour(pos, enemyPos, aPokemans);
 
-			Pokemon& pokemonB = aPokemans[enemyX][enemyY];
+			Pokemon& pokemonB = aPokemans[enemyPos.myX][enemyPos.myY];
 
 			Fight(pokemonA, pokemonB);
 
 			if (pokemonB.myHealth <= 0)
 			{
-				Regenerate(pokemonA.myType, pokemonB);
+				if (pokemonA.myType != pokemonB.myType)
+				{
+					locWinCount[pokemonA.myType]++;
+					locLossCount[pokemonB.myType]++;
+					locFightCount++;
+				}
+
+				Regenerate(pokemonA.myType, pokemonB);	
 			}
 		}
 	}
@@ -253,7 +390,39 @@ int main()
 	{
 		Iterate(pokemans);
 		WriteToFile(i, pokemans);
+
+		if (i % 100 == 0)
+		{
+			std::cout << i << std::endl;
+		}
 	}
+
+	std::cout << "Win Ratio" << std::endl;
+	for (int i = 0; i < locTypeCount; ++i)
+	{
+		const float ratio = locWinCount[static_cast<Type>(i)] / static_cast<float>(locLossCount[static_cast<Type>(i)]);
+		std::cout << TypeToString(static_cast<Type>(i)) << " " << ratio << std::endl;
+	}
+
+	
+
+	for (int x = 0; x < locGridSize; ++x)
+	{
+		for (int y = 0; y < locGridSize; ++y)
+		{
+			locAliveCount[pokemans[x][y].myType]++;
+		}
+	}
+
+	std::cout << "Alive Count" << std::endl;
+
+	for (int i = 0; i < locTypeCount; ++i)
+	{
+		std::cout << TypeToString(static_cast<Type>(i)) << " " << locAliveCount[static_cast<Type>(i)] << std::endl;
+	}
+
+	std::cout << "Fight count" << std::endl;
+	std::cout << locFightCount << std::endl;
 
 	return 0;
 }

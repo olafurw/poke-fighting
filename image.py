@@ -22,6 +22,6 @@ for filename in os.listdir('data'):
 			if intValue >= 0:
 				colorList.append(colors[intValue])
 	
-	im = Image.new('RGB', (256, 256))
+	im = Image.new('RGB', (128, 128))
 	im.putdata(colorList)
 	im.save('images/' + filename + '.png')
